@@ -1,0 +1,55 @@
+version: "3.9"
+services:
+  chainlit:
+    build: ./chainlit
+    container_name: chainlit
+    ports:
+      - "8501:8501"
+    environment:
+      # Variables d'environnement utiles pour la connexion aux BDD ou API
+      POSTGRES_HOST: postgres_db
+      POSTGRES_DB: mydb
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypass
+      VECTOR_DB_HOST: qdrant
+      VECTOR_DB_PORT: 6333
+      OLLAMA_HOST: ollama_app
+      OLLAMA_PORT: "11411"
+      OPENAI_API_KEY: #a remettre
+    depends_on:
+      - postgres_db
+      - qdrant
+      - ollama_app
+
+  ollama_app:
+    build: ./ollama
+    container_name: ollama_app
+    ports:
+      - "11411:11411"  # on mappe le port conteneur 11411 sur l’hôte 11411
+    volumes:
+      - ./ollama/models:/root/.ollama/models # Emplacement du modèle Llama
+  
+  postgres_db:
+    image: postgres:15
+    container_name: postgres_db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: mydb
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.3.0
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"  # Port pour l'interface gRPC si besoin
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+volumes:
+  pgdata:
+  qdrant_storage:
