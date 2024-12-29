@@ -23,8 +23,11 @@ mon-projet-llm-rag/
 │ ├── Dockerfile
 │ ├── requirements.txt
 │ ├── app.py # Fichier principal de l'appli Chainlit/LangChain
-│ └── ...
+│ └── custom_ollama_llm.py
 ├── ollama/
+│ └── models
+│     └── blobs
+│     └── manifests
 │ └── Dockerfile
 ├── docker-compose.yml
 └── README.md

@@ -1,167 +1,104 @@
-# import os
-# import chainlit as cl
-
-# # Qdrant
-# from qdrant_client import QdrantClient
-# from qdrant_client.models import Distance, VectorParams
-
-# # LangChain
-# from langchain.text_splitter import CharacterTextSplitter
-# from langchain.vectorstores import Qdrant
-# from langchain.embeddings.openai import OpenAIEmbeddings
-
-# # Ollama custom
-# from custom_ollama_llm import OllamaLLM
-
-# QDRANT_HOST = os.getenv("VECTOR_DB_HOST", "qdrant")
-# QDRANT_PORT = os.getenv("VECTOR_DB_PORT", "6333")
-# collection_name = "my_collection"
-
-# # Connexion Qdrant
-# qdrant_client = QdrantClient(url=f"http://{QDRANT_HOST}:{QDRANT_PORT}")
-
-# try:
-#     qdrant_client.recreate_collection(
-#         collection_name=collection_name,
-#         vectors_config=VectorParams(size=1536, distance=Distance.COSINE)
-#     )
-#     print(f"Collection '{collection_name}' recréée avec succès.")
-# except Exception as e:
-#     print("Erreur Qdrant:", e)
-
-# # Embeddings (OpenAI, donc nécessite OPENAI_API_KEY)
-# embedding_function = OpenAIEmbeddings()
-
-# # LLM local (Ollama)
-# ollama_llm = OllamaLLM(temperature=0.7)
-
-# # Variable globale : retriever
-# retriever = None
-
-# def index_file_content(text_content: str):
-#     """
-#     Split, embedding, index into Qdrant.
-#     Met à jour la variable globale `retriever`.
-#     """
-#     global retriever
-#     splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-#     docs = splitter.create_documents([text_content])
-
-#     vectorstore = Qdrant.from_documents(
-#         docs,
-#         embedding_function,
-#         url=f"http://{QDRANT_HOST}:{QDRANT_PORT}",
-#         collection_name=collection_name
-#     )
-#     retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 3})
-
-
-# @cl.on_chat_start
-# async def on_chat_start():
-#     """Message de bienvenue."""
-#     await cl.Message(
-#         content=(
-#             "Bienvenue !\n\n"
-#             "- **Envoyez un message** pour poser une question.\n"
-#             "- **Attachez un fichier** (en cliquant sur l'icône 'Attach') pour l'indexer."
-#         )
-#     ).send()
-
-
-# @cl.on_message
-# async def on_message(msg: cl.Message):
-#     """
-#     Gère à la fois l'upload (si des fichiers sont attachés)
-#     et la question (si c'est seulement du texte).
-#     """
-#     user_text = (msg.content or "").strip()
-#     user_files = msg.files or []  # liste de chainlit.UploadedFile
-
-#     # 1) Si l'utilisateur a attaché un ou plusieurs fichiers
-#     if len(user_files) > 0:
-#         # On indexe chaque fichier
-#         for f in user_files:
-#             file_name = f.name
-#             file_bytes = f.content  # bytes
-
-#             # Pour un PDF, parsez vraiment le PDF (p. ex. PyPDF2).
-#             # Ici on suppose un .txt ou .md qu'on peut .decode("utf-8")
-#             try:
-#                 file_text = file_bytes.decode("utf-8", errors="ignore")
-#             except Exception as e:
-#                 await cl.Message(content=f"Impossible de lire {file_name} : {e}").send()
-#                 continue
-
-#             index_file_content(file_text)
-
-#         await cl.Message(content="Fichier(s) indexé(s) avec succès.").send()
-#         return
-
-#     # 2) Sinon, c'est une question
-#     if not user_text:
-#         await cl.Message(content="Message vide, merci de réessayer.").send()
-#         return
-
-#     # Vérifie si on a déjà un retriever
-#     global retriever
-#     if retriever is None:
-#         await cl.Message(
-#             content="Aucun document n'est encore indexé. Uploadez un fichier pour commencer."
-#         ).send()
-#         return
-
-#     # Récupération des passages pertinents
-#     related_docs = retriever.get_relevant_documents(user_text)
-#     context = "\n\n".join(doc.page_content for doc in related_docs)
-
-#     prompt = f"""
-# Voici du contexte issu de votre base documentaire :
-# {context}
-
-# Question : {user_text}
-
-# Réponds au mieux en citant le contenu si nécessaire.
-# """
-#     response_text = ollama_llm.generate(prompt)
-#     await cl.Message(content=response_text).send()
-
-
 import os
+from typing import List
+
 import chainlit as cl
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
+from langchain.chains import ConversationalRetrievalChain
+from langchain_community.chat_models import ChatOpenAI
+from langchain.docstore.document import Document
+from langchain.memory import ChatMessageHistory, ConversationBufferMemory
 
-# --- Ollama (LLM local)
-from custom_ollama_llm import OllamaLLM
+# Définir la clé API OpenAI
+os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 
-# Instancier l'LLM
-ollama_llm = OllamaLLM(temperature=0.7)
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
 
 @cl.on_chat_start
 async def on_chat_start():
-    """
-    Message de bienvenue au démarrage du chat.
-    """
-    await cl.Message(
-        content=(
-            "Bienvenue dans cette interface !\n\n"
-            "Posez librement vos questions et je vais y répondre via Ollama.\n"
-        )
-    ).send()
+    files = None
+
+    # Attendre que l'utilisateur télécharge un fichier
+    while files is None:
+        files = await cl.AskFileMessage(
+            content="Veuillez télécharger un fichier texte pour commencer !",
+            accept=["text/plain"],
+            max_size_mb=20,
+            timeout=180,
+        ).send()
+
+    file = files[0]
+
+    msg = cl.Message(content=f"Traitement de `{file.name}`...")
+    await msg.send()
+
+    with open(file.path, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    # Diviser le texte en segments
+    texts = text_splitter.split_text(text)
+
+    # Créer des métadonnées pour chaque segment
+    metadatas = [{"source": f"{i}-pl"} for i in range(len(texts))]
+
+    # Créer un store vectoriel Chroma avec un persist_directory
+    embeddings = OpenAIEmbeddings()
+    docsearch = await cl.make_async(Chroma.from_texts)(
+        texts,
+        embeddings,
+        metadatas=metadatas,
+        persist_directory="./chroma_db"  # Spécifiez un répertoire persistant
+    )
+    docsearch.persist()  # Sauvegarder la base de données
+
+    message_history = ChatMessageHistory()
+
+    memory = ConversationBufferMemory(
+        memory_key="chat_history",
+        output_key="answer",
+        chat_memory=message_history,
+        return_messages=True,
+    )
+
+    # Créer une chaîne qui utilise le store vectoriel Chroma
+    chain = ConversationalRetrievalChain.from_llm(
+        ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0, streaming=True),
+        chain_type="stuff",
+        retriever=docsearch.as_retriever(),
+        memory=memory,
+        return_source_documents=True,
+    )
+
+    # Informer l'utilisateur que le système est prêt
+    msg.content = f"Traitement de `{file.name}` terminé. Vous pouvez maintenant poser vos questions !"
+    await msg.update()
+
+    cl.user_session.set("chain", chain)
 
 @cl.on_message
-async def on_message(msg: cl.Message):
-    """
-    Cette fonction est appelée à chaque fois que l'utilisateur envoie un message dans le chat.
-    Elle se contente de transmettre la question à Ollama et d'afficher la réponse.
-    """
-    user_text = msg.content or ""
-    user_text = user_text.strip()
+async def main(message: cl.Message):
+    chain = cl.user_session.get("chain")  # type: ConversationalRetrievalChain
+    cb = cl.AsyncLangchainCallbackHandler()
 
-    if not user_text:
-        await cl.Message(content="Message vide, merci de réessayer.").send()
-        return
+    res = await chain.ainvoke(message.content, callbacks=[cb])
+    answer = res["answer"]
+    source_documents = res["source_documents"]  # type: List[Document]
 
-    # Appel au LLM local (Ollama)
-    response_text = ollama_llm.generate(user_text)
+    text_elements = []  # type: List[cl.Text]
 
-    # On renvoie la réponse à l'utilisateur
-    await cl.Message(content=response_text).send()
+    if source_documents:
+        for source_idx, source_doc in enumerate(source_documents):
+            source_name = f"source_{source_idx}"
+            # Créer l'élément de texte référencé dans le message
+            text_elements.append(
+                cl.Text(content=source_doc.page_content, name=source_name, display="side")
+            )
+        source_names = [text_el.name for text_el in text_elements]
+
+        if source_names:
+            answer += f"\nSources : {', '.join(source_names)}"
+        else:
+            answer += "\nAucune source trouvée"
+
+    await cl.Message(content=answer, elements=text_elements).send()
