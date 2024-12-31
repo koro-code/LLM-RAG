@@ -12,7 +12,7 @@ services:
       POSTGRES_PASSWORD: mypass
       OLLAMA_HOST: ollama_app
       OLLAMA_PORT: "11411"
-      OPENAI_API_KEY: # clé API OpenAI
+      OPENAI_API_KEY: #clé openIA
     volumes:
       - chroma_storage:/app/chroma_db  # Monter le volume
     depends_on:
@@ -38,6 +38,7 @@ services:
       POSTGRES_PASSWORD: mypass
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./init_sql:/docker-entrypoint-initdb.d
 
 volumes:
   pgdata:

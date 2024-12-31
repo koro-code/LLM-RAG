@@ -1,6 +1,6 @@
 chainlit==2.0.dev0
 pydantic==2.10.1
-langchain
+langchain>=0.0.300
 psycopg2-binary==2.9.6
 requests==2.31.0
 langchain_community
