@@ -5,5 +5,3 @@ psycopg2-binary==2.9.6
 qdrant-client==1.3.2
 requests==2.31.0
 openai
-# uvicorn : soit tu laisses Chainlit l’installer automatiquement, 
-#   soit tu mets uvicorn==0.25.x (compatible)
