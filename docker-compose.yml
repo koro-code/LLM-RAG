@@ -12,7 +12,7 @@ services:
       POSTGRES_PASSWORD: mypass
       OLLAMA_HOST: ollama_app
       OLLAMA_PORT: "11411"
-      OPENAI_API_KEY: #clé openIA
+      OPENAI_API_KEY: # Votre clé API OpenAI
     volumes:
       - chroma_storage:/app/chroma_db  # Monter le volume
     depends_on:
